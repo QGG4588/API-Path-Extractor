@@ -1,5 +1,3 @@
-# api-extract
-api提取
 # API Path Extractor
 
 一个强大的工具，用于从 JavaScript 文件和网页中提取 API 路径。支持处理本地文件、在线网页以及批量 URL。
