@@ -1,14 +1,27 @@
-# API Path Extractor
+# API Path & Sensitive Info Extractor
 
-一个强大的工具，用于从 JavaScript 文件和网页中提取 API 路径。支持处理本地文件、在线网页以及批量 URL。
+一个强大的工具，用于从 JavaScript 文件和网页中提取 API 路径和敏感信息。支持处理本地文件、在线网页以及批量 URL。
 
 ## 功能特点
 
-- 🔍 支持多种路径提取模式：
+- 🔍 API路径提取：
   - RESTful API 路径
   - Ajax 请求路径
   - 动态加载路径
   - 版本化 API 路径 (如 v1/api/...)
+- 🔐 敏感信息检测：
+  - 手机号码
+  - 身份证号
+  - API密钥
+  - 邮箱地址
+  - IP地址
+  - 数据库连接串
+  - AWS密钥
+  - JWT令牌
+  - GitHub令牌
+  - 私钥信息
+  - 微信openid
+  - 各类ID参数（用户ID、订单ID、商品ID等）
 - 📁 支持多种输入源：
   - 本地 JS 文件目录
   - 单个网页 URL
@@ -23,12 +36,12 @@
   - 路径去重
   - 动态加载的 JS 文件
   - 路径清理和标准化
+  - 敏感信息上下文提取
 
 ## 安装要求
-```
 
+```bash
 pip install -r requirements.txt 
-
 ```
 
 必需的依赖包：
@@ -41,22 +54,19 @@ pip install -r requirements.txt
 
 ### 1. 处理本地目录
 
-```
-
+```bash
 python api.py -d ./your_js_files -o output.txt
 ```
 
 ### 2. 处理单个 URL
 
-```
-
+```bash
 python api.py -u https://example.com -o output.txt
 ```
 
 ### 3. 处理批量 URL
 
-```
-
+```bash
 python api.py -l urls.txt -o output.txt
 ```
 
@@ -67,15 +77,14 @@ python api.py -l urls.txt -o output.txt
 - `-l, --urls-file`: 指定包含多个 URL 的文件
 - `-o, --output-file`: 指定输出文件名（默认为 api_paths.txt）
 
-## 输出示例
+## 输出格式
 
-```
-/api/v1/users
-/api/v2/products
-/v1/auth/login
-/api/data/statistics
-...
-```
+工具将生成一个 CSV 格式的输出文件，包含以下列：
+- 类型（API路径或敏感信息类型）
+- 值（具体的路径或敏感信息）
+- 文件（来源文件路径或URL）
+- 上下文（敏感信息的前后文）
+- 位置（在文件中的位置）
 
 ## 注意事项
 
@@ -88,6 +97,8 @@ playwright install chromium
 
 3. 处理大型网站时可能需要较长时间
 
+4. 敏感信息检测结果仅供参考，建议进行人工复查
+
 ## 实现细节
 
 - 使用正则表达式匹配多种 API 路径模式
@@ -95,6 +106,16 @@ playwright install chromium
 - 自动过滤静态资源路径
 - 智能处理相对路径和绝对路径
 - 支持多种字符编码
+- 智能识别多种敏感信息模式
+- 提供敏感信息的上下文分析
+
+## 安全建议
+
+1. 及时处理发现的敏感信息
+2. 定期进行代码安全扫描
+3. 避免在代码中硬编码敏感信息
+4. 使用环境变量或配置文件存储敏感信息
+5. 对发现的敏感信息进行脱敏处理
 
 ## 贡献指南
 
