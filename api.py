@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import time
 import os
+import csv
 
 
 def extract_paths(js_code):
@@ -92,12 +93,96 @@ def download_js_file(js_url):
         return ''
 
 
+def extract_sensitive_info(content):
+    """
+    从内容中提取敏感信息。
+    :param content: 要检查的内容字符串。
+    :return: 字典形式的敏感信息结果。
+    """
+    patterns = {
+        '手机号': r'1[3-9]\d{9}',
+        '身份证号': r'[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]',
+        'API密钥': r'(?i)(?:key|api[_-]?key|secret|token)["\s]*(?::|=)["\s]*[\w\-+=]{16,}',
+        '邮箱': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+        'IP地址': r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
+        '数据库连接串': r'(?i)(?:jdbc|mongodb|mysql|postgresql|redis)://[^\s<>"\']+',
+        'AWS密钥': r'(?i)(?:AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}',
+        'JWT令牌': r'eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*',
+        'GitHub令牌': r'(?i)github[_\-\s]*token[_\-\s]*[\w\-+=]{35,40}',
+        '私钥': r'-----BEGIN (?:RSA )?PRIVATE KEY-----[^-]*-----END (?:RSA )?PRIVATE KEY-----',
+        '微信openid': r'(?i)openid["\s]*(?::|=)["\s]*[\w\-]{28}',
+        # 新增各种ID匹配模式
+        '通用ID': r'(?i)(?:"|\'|\s|^)([a-zA-Z]+[iI][dD])["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '数据库ID': r'(?i)(?:"|\'|\s|^)(?:record|row|entity|object)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '用户ID': r'(?i)(?:"|\'|\s|^)(?:user|account|member|customer)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '订单ID': r'(?i)(?:"|\'|\s|^)(?:order|transaction|payment)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '商品ID': r'(?i)(?:"|\'|\s|^)(?:product|goods|item|sku)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '设备ID': r'(?i)(?:"|\'|\s|^)(?:device|equipment|machine)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+        '会话ID': r'(?i)(?:"|\'|\s|^)(?:session|token)_?[iI][dD]["\s]*(?::|=)["\s]*["\']?([\w-]{4,})["\']?',
+    }
+    
+    results = {}
+    for info_type, pattern in patterns.items():
+        matches = re.finditer(pattern, content)
+        if matches:
+            results[info_type] = []
+            for match in matches:
+                # 获取匹配文本的上下文（前后20个字符）
+                start_pos = max(0, match.start() - 20)
+                end_pos = min(len(content), match.end() + 20)
+                context = content[start_pos:end_pos]
+                
+                results[info_type].append({
+                    'value': match.group(),
+                    'context': context,
+                    'position': (match.start(), match.end())
+                })
+    
+    return results
+
+
+def save_results_to_csv(paths, sensitive_info, output_file):
+    """
+    将API路径和敏感信息保存到同一个CSV文件中。
+    :param paths: API路径列表
+    :param sensitive_info: 敏感信息字典
+    :param output_file: 输出文件路径
+    """
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # 将输出文件扩展名改为.csv
+    csv_path = os.path.splitext(output_file)[0] + '.csv'
+    
+    with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.writer(f)
+        
+        # 写入表头
+        writer.writerow(['类型', '值', '文件', '上下文', '位置'])
+        
+        # 写入API路径
+        for path in paths:
+            writer.writerow(['API路径', path, '', '', ''])
+        
+        # 写入敏感信息
+        for info_type, info_list in sensitive_info.items():
+            for info in info_list:
+                writer.writerow([
+                    info_type,
+                    info['value'],
+                    info.get('file', 'N/A'),
+                    info['context'].replace('\n', ' '),  # 移除换行符以避免CSV格式混乱
+                    f"({info['position'][0]}, {info['position'][1]})"
+                ])
+    
+    return csv_path
+
+
 def extract_paths_from_website(url, output_file, page):
     """
-    从网站中提取所有 JS 文件的路径，并保存到输出文件，同时打印到控制台。
-    :param url: 网站首页的 URL。
-    :param output_file: 输出文件路径。
-    :param page: Playwright 页面实例。
+    从网站中提取所有 JS 文件的路径和敏感信息。
     """
     js_files = extract_js_files_from_website(url, page)
     if not js_files:
@@ -105,27 +190,38 @@ def extract_paths_from_website(url, output_file, page):
         return
 
     all_paths = []
+    all_sensitive_info = {}
 
     for js_file in js_files:
-        print(f"正在处理 JS 文件: {js_file}")
+        print(f"\n正在处理 JS 文件: {js_file}")
         js_code = download_js_file(js_file)
         if js_code:
             paths = extract_paths(js_code)
             all_paths.extend(paths)
+            
+            sensitive_info = extract_sensitive_info(js_code)
+            for info_type, info_list in sensitive_info.items():
+                if info_type not in all_sensitive_info:
+                    all_sensitive_info[info_type] = []
+                for info in info_list:
+                    info['file'] = js_file
+                all_sensitive_info[info_type].extend(info_list)
 
-    # 去重并保持顺序
     unique_paths = list(dict.fromkeys(all_paths))
-
-    # 将路径同时打印到控制台并保存到输出文件
+    
     try:
-        with open(output_file, 'w', encoding='utf-8') as file:
-            for path in unique_paths:
-                print(path)  # 打印到控制台
-                file.write(path + '\n')  # 保存到文件
-
-        print(f"路径提取完成！共提取到 {len(unique_paths)} 个路径，结果已保存到 '{output_file}'。")
+        csv_path = save_results_to_csv(unique_paths, all_sensitive_info, output_file)
+        
+        print(f"\n提取完成！")
+        print(f"- 共提取到 {len(unique_paths)} 个API路径")
+        print(f"- 发现 {len(all_sensitive_info)} 种类型的敏感信息")
+        print(f"结果已保存到: {csv_path}")
+        
+        if all_sensitive_info:
+            print("\n⚠️ 警告：发现敏感信息！请检查输出文件查看详细信息。")
+            
     except Exception as e:
-        print(f"发生错误：{e}")
+        print(f"保存结果时出错: {str(e)}")
 
 
 def run_playwright_script(url=None, urls_file=None, output_file='api.txt'):
@@ -201,7 +297,8 @@ def process_local_directory(directory, output_file):
     :param output_file: 输出文件路径。
     """
     all_paths = []
-    js_extensions = ('.js', '.jsx', '.ts', '.tsx', '.map')  # 支持的文件扩展名
+    all_sensitive_info = {}
+    js_extensions = ('.js', '.jsx', '.ts', '.tsx', '.map')
 
     # 遍历目录
     for root, _, files in os.walk(directory):
@@ -209,20 +306,46 @@ def process_local_directory(directory, output_file):
             if file.endswith(js_extensions):
                 file_path = os.path.join(root, file)
                 print(f"\n正在处理文件: {file_path}")
-                paths = process_local_js_file(file_path)
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    try:
+                        with open(file_path, 'r', encoding='gbk') as f:
+                            content = f.read()
+                    except Exception as e:
+                        print(f"处理文件 {file_path} 时出错: {str(e)}")
+                        continue
+                except Exception as e:
+                    print(f"处理文件 {file_path} 时出错: {str(e)}")
+                    continue
+
+                paths = extract_paths(content)
                 if paths:
                     all_paths.extend(paths)
 
-    # 去重并保持顺序
-    unique_paths = list(dict.fromkeys(all_paths))
+                sensitive_info = extract_sensitive_info(content)
+                for info_type, info_list in sensitive_info.items():
+                    if info_type not in all_sensitive_info:
+                        all_sensitive_info[info_type] = []
+                    for info in info_list:
+                        info['file'] = file_path
+                    all_sensitive_info[info_type].extend(info_list)
 
-    # 保存结果
+    unique_paths = list(dict.fromkeys(all_paths))
+    
     try:
-        with open(output_file, 'w', encoding='utf-8') as f:
-            for path in unique_paths:
-                print(path)  # 打印到控制台
-                f.write(path + '\n')
-        print(f"\n路径提取完成！共提取到 {len(unique_paths)} 个路径，结果已保存到 '{output_file}'。")
+        csv_path = save_results_to_csv(unique_paths, all_sensitive_info, output_file)
+        
+        print(f"\n提取完成！")
+        print(f"- 共提取到 {len(unique_paths)} 个API路径")
+        print(f"- 发现 {len(all_sensitive_info)} 种类型的敏感信息")
+        print(f"结果已保存到: {csv_path}")
+        
+        if all_sensitive_info:
+            print("\n⚠️ 警告：发现敏感信息！请检查输出文件查看详细信息。")
+            
     except Exception as e:
         print(f"保存结果时出错: {str(e)}")
 
